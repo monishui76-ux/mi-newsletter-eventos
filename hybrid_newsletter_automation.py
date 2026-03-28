@@ -1,4 +1,12 @@
 import os
+# ESTAS DOS LÍNEAS ARREGLAN EL ERROR:
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["GLOG_minloglevel"] = "2"
+
+import requests
+import google.generativeai as genai
+# ... (el resto de tus imports)
+import os
 import requests
 import google.generativeai as genai
 import smtplib
