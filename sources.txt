@@ -1,0 +1,36 @@
+# Lista de URLs para la newsletter de eventos culturales en Málaga
+# Cada línea debe contener una URL de feed RSS válida (precedida de 'rss:') o una URL de web para scraping (precedida de 'web:').
+# Las líneas que comienzan con '#' son comentarios y serán ignoradas.
+
+# --- Fuentes RSS --- #
+rss: https://www.carmenthyssenmalaga.org/feed
+rss: http://ateneomalaga.org/feed/
+rss: https://www.uma.es/feed/
+rss: https://www.lanavemalaga.es/feed/
+rss: https://teatrodelsoho.com/feed
+rss: https://juventud.malaga.eu/es/infojoven/recursos-para-jovenes/recursos-formacion/rss/actividades.rss
+rss: https://lainvisible.net/feed/
+rss: https://lacocheracabaret.com/feed/
+rss: https://centrepompidou-malaga.eu/feed/
+rss: https://www.coleccionmuseoruso.es/feed/
+rss: https://www.fundacionunicaja.com/feed/
+rss: https://orquestafilarmonicademalaga.com/feed/
+rss: https://www.uma.es/feed/
+rss: https://cclamalagueta.com/feed
+rss: https://paris15.es/feed/
+rss: https://salatrinchera.com/feed/
+rss: https://marenostrumfuengirola.com/feed/
+
+# Fuentes RSS adicionales de Málaga capital
+rss: https://rss.malaga.eu/ayto/m_ciudad/portal/menu/varios/rssd/destacados/espectaculos.rss
+rss: https://www.malagahoy.es/rss/cultura/
+rss: https://www.malaga.es/cultura/rss/
+
+# --- Fuentes para Web Scraping (sin RSS o con errores ) --- #
+web: https://www.museopicassomalaga.org/
+web: http://fundacionpicasso.malaga.eu/
+web: https://www.museojorgerando.org/
+web: http://www.museosdeandalucia.es/web/museodemalaga
+web: https://www.malagaprocultura.com/
+web: https://latermicamalaga.com/
+web: https://www.elcorteingles.es/centroscomerciales/es/eci/centros/centro-comercial-malaga/eventos
