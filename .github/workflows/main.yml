@@ -1,0 +1,25 @@
+name: Enviar Newsletter Semanal de Eventos Híbrida
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Todos los lunes a las 8:00 AM UTC
+  workflow_dispatch: # Permite ejecutarlo manualmente para probar
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v3
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Instalar herramientas
+        run: |
+          pip install requests google-generativeai feedparser beautifulsoup4
+      - name: Ejecutar programa
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python hybrid_newsletter_automation.py
