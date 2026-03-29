@@ -20,12 +20,7 @@ import json
 
 # --- CONFIGURACIÓN PARA GEMINI 2.5 / 3 ---
 SOURCES_FILE = 'sources.txt'
-
-# Configuramos la API Key de Google
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-
-# USAMOS EL MODELO MODERNO DE TU PANEL (Gemini 2.5 Flash)
-# Si en tu panel ves exactamente "Gemini 3", puedes cambiarlo a "gemini-3-flash"
 modelo_final = genai.GenerativeModel("gemini-2.5-flash")
 
 def get_sources(file_path):
@@ -42,14 +37,19 @@ def get_sources(file_path):
 
 def parse_rss_feed(feed_url):
     events = []
+    # No filtramos aquí por fecha de publicación, dejamos que Gemini decida la vigencia
     try:
         feed = feedparser.parse(feed_url)
         for entry in feed.entries:
+            fecha_pub = None
+            if hasattr(entry, 'published_parsed'):
+                fecha_pub = datetime(*entry.published_parsed[:6])
+            
             events.append({
                 'title': getattr(entry, 'title', 'Sin título'),
                 'link': getattr(entry, 'link', 'Sin enlace'),
                 'summary': getattr(entry, 'summary', 'Sin descripción'),
-                'date': datetime(*entry.published_parsed[:6]) if hasattr(entry, 'published_parsed') else None,
+                'date_pub': fecha_pub,
                 'source': feed_url
             })
     except: pass
@@ -57,51 +57,74 @@ def parse_rss_feed(feed_url):
 
 def scrape_web_with_gemini(url):
     events = []
+    hoy = datetime.now().strftime('%Y-%m-%d')
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         resp = requests.get(url, headers=headers, timeout=15, verify=False)
         soup = BeautifulSoup(resp.text, 'html.parser')
         for s in soup(["script", "style"]): s.extract()
-        clean_text = " ".join(soup.get_text().split())[:12000]
+        clean_text = " ".join(soup.get_text().split())[:15000]
         
-        prompt = f"Extrae eventos de este texto en JSON: {clean_text}. Formato: [{{'title': '...', 'date': 'YYYY-MM-DD', 'summary': '...', 'link': '...'}}]"
+        prompt = f"""Analiza este texto de una web cultural de Málaga. Hoy es {hoy}.
+Extrae los eventos que CUMPLAN ALGUNA de estas condiciones:
+1. Eventos que ocurrirán en el futuro.
+2. Eventos o exposiciones que ya han comenzado pero que SIGUEN VIGENTES hoy (tienen una duración de varios días/meses).
+
+Devuelve un JSON: [{{'title': '...', 'date_info': '...', 'summary': '...', 'link': '...'}}]
+En 'date_info', indica el rango de fechas o la fecha específica.
+"""
         
-        # Llamada estándar compatible con Gemini 2.5 / 3
         res = modelo_final.generate_content(prompt)
         data = json.loads(res.text.replace('```json', '').replace('```', '').strip())
         for e in data:
-            e['date'] = datetime.strptime(e['date'], '%Y-%m-%d') if e.get('date') and e['date'] != 'Fecha por confirmar' else None
             e['source'], e['type'] = url, 'web'
             events.append(e)
     except: pass
     return events
 
 def generate_hash(e):
-    # Crea una huella única para evitar duplicados
-    d = e['date'].strftime('%Y-%m-%d') if e['date'] else 'NA'
-    return hashlib.md5(f"{e['title']}-{d}".encode()).hexdigest()
+    # Generar un hash basado en el título para evitar duplicados exactos
+    return hashlib.md5(e['title'].encode()).hexdigest()
 
 def summarize_and_order_events_with_gemini(all_events):
-    if not all_events: return "No se han encontrado eventos esta semana."
+    if not all_events: return "<p>No se han encontrado eventos vigentes esta semana.</p>"
+    
+    hoy_str = datetime.now().strftime('%d/%m/%Y')
     txt = ""
     for e in all_events:
-        txt += f"- {e['title']} ({e['date']}): {e['link']}\n"
+        date_info = e.get('date_info', e.get('date_pub', 'Consultar web'))
+        txt += f"- Evento: {e['title']} | Fechas: {date_info} | Fuente: {e['source']} | Resumen: {e['summary'][:150]}... | Link: {e['link']}\n"
 
-    prompt = f"Eres un experto cultural en Málaga. Resume y ordena estos eventos por fecha, eliminando duplicados y presentándolos de forma atractiva para una newsletter:\n\n{txt}"
+    prompt = f"""Actúa como un editor cultural experto de Málaga. Hoy es {hoy_str}.
+Tu misión es redactar una newsletter profesional y amigable.
+
+INSTRUCCIONES DE FILTRADO Y DISEÑO:
+1. MANTÉN los eventos futuros Y las exposiciones que ya han empezado pero que TODAVÍA se pueden visitar hoy.
+2. ELIMINA cualquier evento que ya haya finalizado por completo antes de hoy ({hoy_str}).
+3. ORDENA los eventos por fecha de inicio (de más cercano a más lejano).
+4. FORMATO: Devuelve el contenido en HTML elegante.
+5. Usa una TABLA (<table>) con columnas: "Fechas", "Evento / Exposición", "Descripción" y "Enlace".
+6. Aplica estilos CSS en línea: tabla con bordes colapsados, fondo gris claro para el encabezado, padding en las celdas y fuentes limpias (Arial/sans-serif).
+7. Incluye una introducción saludando a los malagueños y una despedida calurosa.
+
+Eventos detectados:
+{txt}
+"""
     
     try:
-        # Generación del resumen final
         response = modelo_final.generate_content(prompt)
-        return response.text
+        return response.text.replace('```html', '').replace('```', '').strip()
     except Exception as err:
-        return f"ERROR AL GENERAR RESUMEN: {str(err)}"
+        return f"<p>ERROR AL GENERAR NEWSLETTER: {str(err)}</p>"
 
 def send_email(subject, content):
     user, pwd = os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS")
     if not user or not pwd: return
     msg = MIMEMultipart("alternative")
     msg["From"], msg["To"], msg["Subject"] = user, user, subject
+    
     msg.attach(MIMEText(content, "html"))
+    
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(user, pwd)
@@ -120,13 +143,12 @@ if __name__ == "__main__":
             h = generate_hash(e)
             if h not in hashes: all_ev.append(e); hashes.add(h)
     
-    # Procesar Web Scraping con IA
+    # Procesar Web Scraping
     for u in web_urls:
         for e in scrape_web_with_gemini(u):
             h = generate_hash(e)
             if h not in hashes: all_ev.append(e); hashes.add(h)
     
-    # Ordenar por fecha y enviar
-    all_ev.sort(key=lambda x: x['date'] if x['date'] else datetime.max)
+    # Generar y enviar newsletter
     content = summarize_and_order_events_with_gemini(all_ev)
-    send_email("Tu Newsletter de Eventos en Málaga", content)
+    send_email("Tu Newsletter de Eventos y Exposiciones en Málaga", content)
