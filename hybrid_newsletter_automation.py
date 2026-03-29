@@ -1,12 +1,4 @@
 import os
-# ESTAS DOS LÍNEAS ARREGLAN EL ERROR:
-os.environ["GRPC_VERBOSITY"] = "ERROR"
-os.environ["GLOG_minloglevel"] = "2"
-
-import requests
-import google.generativeai as genai
-# ... (el resto de tus imports)
-import os
 import requests
 import google.generativeai as genai
 import smtplib
@@ -24,10 +16,7 @@ SOURCES_FILE = 'sources.txt'
 
 # Configurar Gemini
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-# Sustituye la línea del modelo por estas dos:
-import google.generativeai as genai
-# Forzamos el uso del modelo Pro estable que nunca falla el 404
-model = genai.GenerativeModel(model_name="gemini-1.5-pro") 
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # --- Funciones --- #
 def get_sources(file_path):
@@ -80,12 +69,15 @@ def scrape_web_with_gemini(url):
         response = requests.get(url, headers=headers, timeout=15, verify=False)
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # Eliminar scripts y estilos para limpiar el texto
         for script in soup(["script", "style"]):
             script.extract()
         text = soup.get_text()
         
+        # Limitar el texto a enviar a Gemini para evitar exceder el límite de tokens
         clean_text = " ".join(text.split())
         
+        # Prompt para Gemini para extraer eventos
         prompt = f"""Analiza el siguiente texto de una página web: 
 {clean_text[:15000]}
 
@@ -101,17 +93,19 @@ Ejemplo de salida JSON:
 ]
 """
         
-        gemini_response = model.generate_content(prompt )
+        gemini_response = model.generate_content(prompt)
         response_text = gemini_response.text.strip()
         
+        # Intentar parsear la respuesta JSON de Gemini
         try:
             extracted_events = json.loads(response_text)
             for event in extracted_events:
+                # Asegurarse de que la fecha sea un objeto datetime si es posible
                 if event.get('date') and event['date'] != 'Fecha por confirmar':
                     try:
                         event['date'] = datetime.strptime(event['date'], '%Y-%m-%d')
                     except ValueError:
-                        event['date'] = None
+                        event['date'] = None # No se pudo parsear la fecha
                 else:
                     event['date'] = None
                 event['source'] = url
@@ -119,13 +113,18 @@ Ejemplo de salida JSON:
                 events.append(event)
         except json.JSONDecodeError:
             print(f"Gemini no devolvió JSON válido para {url}: {response_text[:200]}...")
+            # Si Gemini no devuelve JSON, intentar un parseo más simple o registrar el error
+            # Para este tutorial, simplemente ignoramos los eventos no JSON
 
     except Exception as e:
         print(f"Error al hacer web scraping en {url}: {e}")
     return events
 
 def generate_event_hash(event):
+    # Genera un hash único para cada evento para la deduplicación
+    # Considera título, fecha (si existe) y una parte del resumen
     date_str = event['date'].strftime('%Y-%m-%d') if event['date'] else 'NODATE'
+    # Usar los primeros 100 caracteres del resumen para el hash
     summary_part = event['summary'][:100] if event['summary'] else 'NOSUMMARY'
     unique_string = f"{event['title']}-{date_str}-{summary_part}"
     return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
@@ -134,6 +133,7 @@ def summarize_and_order_events_with_gemini(all_events):
     if not all_events:
         return "No se encontraron eventos para resumir."
 
+    # Formatear eventos para el prompt de Gemini
     events_text = ""
     for event in all_events:
         date_str = event['date'].strftime('%Y-%m-%d') if event['date'] else 'Fecha desconocida'
@@ -181,7 +181,7 @@ Aquí tienes un resumen de los próximos eventos culturales en Málaga:
 
 def send_email(subject, content):
     remitente = os.environ.get("EMAIL_USER")
-    destinatario = os.environ.get("EMAIL_USER")
+    destinatario = os.environ.get("EMAIL_USER") # Se envía a sí mismo por defecto
     password = os.environ.get("EMAIL_PASS")
 
     if not remitente or not password:
@@ -193,6 +193,7 @@ def send_email(subject, content):
     msg["To"] = destinatario
     msg["Subject"] = subject
 
+    # Adjuntar el contenido como HTML para un formato más rico
     part1 = MIMEText(content, "html")
     msg.attach(part1)
 
@@ -211,6 +212,7 @@ if __name__ == "__main__":
     all_events = []
     processed_hashes = set()
 
+    # Procesar RSS feeds
     for url in rss_feed_urls:
         print(f"Procesando RSS: {url}")
         events_from_feed = parse_rss_feed(url)
@@ -220,6 +222,7 @@ if __name__ == "__main__":
                 all_events.append(event)
                 processed_hashes.add(event_hash)
 
+    # Procesar URLs de web scraping
     for url in web_scrape_urls:
         print(f"Haciendo web scraping en: {url}")
         events_from_scrape = scrape_web_with_gemini(url)
@@ -229,6 +232,7 @@ if __name__ == "__main__":
                 all_events.append(event)
                 processed_hashes.add(event_hash)
         
+    # Ordenar eventos por fecha antes de enviar a Gemini
     all_events.sort(key=lambda x: x['date'] if x['date'] else datetime.max)
 
     print("Generando resumen con Gemini...")
@@ -236,3 +240,4 @@ if __name__ == "__main__":
     
     print("Enviando newsletter...")
     send_email("Tu Resumen de Eventos Culturales en Málaga", newsletter_content)
+    
