@@ -24,7 +24,10 @@ SOURCES_FILE = 'sources.txt'
 
 # Configurar Gemini
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-pro")
+# Sustituye la línea del modelo por estas dos:
+import google.generativeai as genai
+# Forzamos el uso del modelo Pro estable que nunca falla el 404
+model = genai.GenerativeModel(model_name="gemini-1.5-pro") 
 
 # --- Funciones --- #
 def get_sources(file_path):
