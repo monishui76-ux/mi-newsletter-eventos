@@ -24,7 +24,7 @@ SOURCES_FILE = 'sources.txt'
 
 # Configurar Gemini
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash-latest")
+model = genai.GenerativeModel("gemini-pro")
 
 # --- Funciones --- #
 def get_sources(file_path):
