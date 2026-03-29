@@ -1,42 +1,27 @@
 name: Enviar Newsletter Semanal de Eventos Híbrida
-
 on:
   schedule:
-    # Se ejecuta todos los lunes a las 08:00 AM UTC
-    # (9:00 AM en invierno / 10:00 AM en verano en España)
     - cron: '0 8 * * 1'
-  workflow_dispatch: # Permite ejecutarlo manualmente para pruebas
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    # Esta variable fuerza el uso de Node.js 24 y elimina los avisos de deprecación
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Esto soluciona el aviso de Node.js
     steps:
-      # Paso 1: Descargar el código de tu repositorio (Versión v4 estable)
       - name: Descargar código
-        uses: actions/checkout@v4
-
-      # Paso 2: Configurar el entorno de Python (Versión v5 estable)
+        uses: actions/checkout@v4 # Actualizado de v3 a v4
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5 # Actualizado de v4 a v5
         with:
           python-version: '3.11'
-          cache: 'pip' # Acelera las ejecuciones futuras guardando las librerías
-
-      # Paso 3: Instalar las librerías necesarias
       - name: Instalar herramientas
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -U google-generativeai requests feedparser beautifulsoup4
-
-      # Paso 4: Ejecutar el script híbrido
       - name: Ejecutar programa
         env:
-          # Aquí es donde GitHub lee tus "Secrets" guardados en Settings
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
