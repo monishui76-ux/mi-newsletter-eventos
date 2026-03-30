@@ -1,0 +1,1 @@
+Envío de newsletter semanal los viernes por la mañana de agenda cultural de Málaga capital (España), cargada de exposiciones vigentes y eventos que están a punto de comenzar o se extienden durante los próximos meses.
