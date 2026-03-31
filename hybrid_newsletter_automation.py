@@ -82,8 +82,8 @@ def scrape_web_with_gemini(url):
     visited_urls = set()
     urls_to_scrape = [url]
     all_text_content = ""
+    all_image_urls = []
     
-    # Límite de profundidad para evitar scraping infinito
     MAX_DEPTH = 1
     current_depth = 0
 
@@ -96,52 +96,92 @@ def scrape_web_with_gemini(url):
             headers = {'User-Agent': 'Mozilla/5.0'}
             resp = requests.get(current_url, headers=headers, timeout=15, verify=False)
             soup = BeautifulSoup(resp.text, 'html.parser')
-            for s in soup(["script", "style", "header", "footer", "nav"]): s.extract() # Eliminar elementos no relevantes
+            
+            # Extraer URLs de imágenes
+            for img_tag in soup.find_all('img', src=True):
+                img_src = img_tag['src']
+                full_img_url = urljoin(current_url, img_src)
+                # Filtrar imágenes pequeñas o irrelevantes (ej. iconos)
+                if not any(ext in full_img_url.lower() for ext in ['.gif', '.svg', '.ico']) and \
+                   'logo' not in full_img_url.lower() and 'icon' not in full_img_url.lower():
+                    all_image_urls.append(full_img_url)
+
+            for s in soup(["script", "style", "header", "footer", "nav"]): s.extract()
             clean_text = " ".join(soup.get_text().split())
             all_text_content += clean_text + "\n\n"
 
-            # Buscar enlaces de eventos en la página actual para la siguiente iteración
             if current_depth < MAX_DEPTH:
                 new_links = find_event_links(current_url, soup, visited_urls)
                 urls_to_scrape.extend(new_links)
-                current_depth += 1 # Incrementar profundidad solo si se encuentran nuevos enlaces
+                current_depth += 1
             
-            time.sleep(1) # Pequeña pausa para evitar bloqueos
+            time.sleep(1)
 
         except Exception as e:
             print(f"Error scraping {current_url}: {e}")
             continue
 
-    # Dividir el texto en chunks si es demasiado largo para Gemini
-    MAX_GEMINI_INPUT_LENGTH = 25000 # Aumentado para más exhaustividad
+    MAX_GEMINI_INPUT_LENGTH = 25000
     text_chunks = [all_text_content[i:i + MAX_GEMINI_INPUT_LENGTH] for i in range(0, len(all_text_content), MAX_GEMINI_INPUT_LENGTH)]
     
+    # Preparar partes para Gemini (texto e imágenes)
+    gemini_parts = []
     for chunk in text_chunks:
-        prompt = f"""Analiza este texto de una web cultural de Málaga. Hoy es {hoy}.
+        gemini_parts.append(chunk)
+    
+    # Añadir imágenes, limitando para no exceder el contexto de Gemini
+    # Gemini 2.5 Flash tiene un límite de contexto muy alto, pero es bueno ser precavido
+    # Limitar a 5 imágenes por URL principal para evitar sobrecarga
+    for img_url in all_image_urls[:5]: 
+        gemini_parts.append(genai.upload_file(img_url))
+
+    prompt_text = f"""Analiza este contenido (texto e imágenes) de una web cultural de Málaga. Hoy es {hoy}.
         Extrae los eventos que CUMPLAN ALGUNA de estas condiciones:
         1. Eventos que ocurrirán en el futuro.
         2. Eventos o exposiciones que ya han comenzado pero que SIGUEN VIGENTES hoy (tienen una duración de varios días/meses).
         
         Devuelve un JSON: [{{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}}]
         En \'date_info\', indica el rango de fechas o la fecha específica. Si no hay enlace específico para el evento, usa el enlace de la web principal.
+        Si la información del evento proviene de una imagen, indícalo en el resumen.
         
-        Texto a analizar:
-        {chunk}
+        Contenido a analizar:
         """
-        
+    
+    # Combinar el prompt con las partes de texto e imagen
+    full_gemini_input = [prompt_text] + gemini_parts
+
+    try:
+        res = modelo_final.generate_content(full_gemini_input)
+        data = json.loads(res.text.replace('```json', '').replace('```', '').strip())
+        for e in data:
+            e['source'], e['type'] = url, 'web'
+            events.append(e)
+    except Exception as e:
+        print(f"Error con Gemini en scraping multimodal: {e}")
+        # Intentar con solo texto si falla el multimodal
         try:
-            res = modelo_final.generate_content(prompt)
-            data = json.loads(res.text.replace('```json', '').replace('```', '').strip())
-            for e in data:
+            prompt_text_fallback = f"""Analiza este texto de una web cultural de Málaga. Hoy es {hoy}.
+                Extrae los eventos que CUMPLAN ALGUNA de estas condiciones:
+                1. Eventos que ocurrirán en el futuro.
+                2. Eventos o exposiciones que ya han comenzado pero que SIGUEN VIGENTES hoy (tienen una duración de varios días/meses).
+                
+                Devuelve un JSON: [{{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}}]
+                En \'date_info\', indica el rango de fechas o la fecha específica. Si no hay enlace específico para el evento, usa el enlace de la web principal.
+                
+                Texto a analizar:
+                {all_text_content[:MAX_GEMINI_INPUT_LENGTH]}
+                """
+            res_fallback = modelo_final.generate_content(prompt_text_fallback)
+            data_fallback = json.loads(res_fallback.text.replace('```json', '').replace('```', '').strip())
+            for e in data_fallback:
                 e['source'], e['type'] = url, 'web'
                 events.append(e)
-        except Exception as e:
-            print(f"Error con Gemini en chunk: {e}")
-            continue
+        except Exception as e_fallback:
+            print(f"Error con Gemini en scraping solo texto (fallback): {e_fallback}")
+            pass
     return events
 
 def generate_hash(e):
-    # Generar un hash basado en el título y la información de fecha para evitar duplicados
     date_info = e.get('date_info', '')
     return hashlib.md5(f"{e['title']}-{date_info}".encode()).hexdigest()
 
@@ -196,18 +236,17 @@ if __name__ == "__main__":
     rss_urls, web_urls = get_sources(SOURCES_FILE)
     all_ev, hashes = [], set()
     
-    # Procesar RSS
     for u in rss_urls:
         for e in parse_rss_feed(u):
             h = generate_hash(e)
             if h not in hashes: all_ev.append(e); hashes.add(h)
     
-    # Procesar Web Scraping
     for u in web_urls:
         for e in scrape_web_with_gemini(u):
             h = generate_hash(e)
             if h not in hashes: all_ev.append(e); hashes.add(h)
     
-    # Generar y enviar newsletter
+    all_ev.sort(key=lambda x: x['date_pub'] if x['date_pub'] else datetime.max) # Ordenar por fecha de publicación para RSS
+    
     content = summarize_and_order_events_with_gemini(all_ev)
     send_email("Tu Newsletter de Eventos y Exposiciones en Málaga", content)
