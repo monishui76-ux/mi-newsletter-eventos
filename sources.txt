@@ -1,12 +1,7 @@
-# Lista de URLs para la newsletter de eventos culturales en Málaga
-# Cada línea debe contener una URL de feed RSS válida (precedida de 'rss:') o una URL de web para scraping (precedida de 'web:').
-# Las líneas que comienzan con '#' son comentarios y serán ignoradas.
-
-# --- Fuentes RSS --- #
+# --- FUENTES RSS (MÁXIMA EFICIENCIA) ---
 rss: https://www.carmenthyssenmalaga.org/feed
 rss: http://ateneomalaga.org/feed/
 rss: https://www.uma.es/feed/
-rss: https://www.lanavemalaga.es/feed/
 rss: https://teatrodelsoho.com/feed
 rss: https://juventud.malaga.eu/es/infojoven/recursos-para-jovenes/recursos-formacion/rss/actividades.rss
 rss: https://lainvisible.net/feed/
@@ -15,22 +10,55 @@ rss: https://centrepompidou-malaga.eu/feed/
 rss: https://www.coleccionmuseoruso.es/feed/
 rss: https://www.fundacionunicaja.com/feed/
 rss: https://orquestafilarmonicademalaga.com/feed/
-rss: https://www.uma.es/feed/
 rss: https://cclamalagueta.com/feed
 rss: https://paris15.es/feed/
 rss: https://salatrinchera.com/feed/
 rss: https://marenostrumfuengirola.com/feed/
-
-# Fuentes RSS adicionales de Málaga capital
 rss: https://rss.malaga.eu/ayto/m_ciudad/portal/menu/varios/rssd/destacados/espectaculos.rss
 rss: https://www.malagahoy.es/rss/cultura/
 rss: https://www.malaga.es/cultura/rss/
 
-# --- Fuentes para Web Scraping (sin RSS o con errores ) --- #
-web: https://www.museopicassomalaga.org/
-web: http://fundacionpicasso.malaga.eu/
-web: https://www.museojorgerando.org/
-web: http://www.museosdeandalucia.es/web/museodemalaga
-web: https://www.malagaprocultura.com/
-web: https://latermicamalaga.com/
-web: https://www.elcorteingles.es/centroscomerciales/es/eci/centros/centro-comercial-malaga/eventos
+# --- FUENTES DE AGENDA Y EXPOSICIONES (SCRAPING DIRECTO) ---
+web: https://www.carmenthyssenmalaga.org/actividades
+web: https://centrepompidou-malaga.eu/events/lista/
+web: https://www.coleccionmuseoruso.es/events/
+web: https://www.coleccionmuseoruso.es/exposiciones/#actuales
+web: https://museocasanatalpicasso.malaga.eu/actividades/
+web: https://teatrodelsoho.com/programacion/?temporada=temporada-2025-2026
+web: https://www.fundacionunicaja.com/agenda/
+web: https://www.uma.es/servicio-cultura/info/106686/exposiciones-actuales/
+web: https://www.uma.es/contenedorcultural/cms/base/ver/collection/collection/108450/cine/
+web: https://www.uma.es/contenedorcultural/cms/base/ver/collection/collection/109188/musica/
+web: https://www.uma.es/servicio-cultura/noticias/
+web: https://www.uma.es/servicio-cultura/noticias/programacion-contenedor-cultural-uma-abril-2026/
+web: https://www.lanavemalaga.es/ano-2026/
+web: https://www.lanavemalaga.es/ano-2027/
+web: https://www.lanavemalaga.es/ano-2028/
+web: https://www.lanavemalaga.es/talleres-abiertos/
+web: https://lainvisible.net
+web: https://lacocheracabaret.com/programacion/
+web: https://orquestafilarmonicademalaga.com/agenda/
+web: https://www.uma.es/asprojuma/cms/base/ver/collection/collection/157742/actividades-2026/
+web: https://cclamalagueta.com/programacion/
+web: https://cclamalagueta.com/eventos-especiales/
+web: https://cclamalagueta.com/exposiciones2/
+web: https://paris15.es/eventos/
+web: https://salatrinchera.com/category/proximos-eventos/
+web: https://marenostrumfuengirola.com/
+web: https://mmalaga.es/agenda-ocio-cultural-malaga/
+web: https://feverup.com/es/malaga/candlelight?srsltid=AfmBOoqdQvzN66ENjJx4vdJllZC6QnLEDubWf58n8QebKRGBKPBcAkMb
+web: https://www.thehall.in/programacion.html
+
+# --- PROGRAMACIÓN EN PDF (EXTRACCIÓN EXPERIMENTAL) ---
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Marzo-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Abril-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Mayo-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Junio-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Julio-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Agosto-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Septiembre-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Octubre-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Noviembre-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Diciembre-26.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Enero-27.pdf
+web: https://juventud.malaga.eu/opencms/export/sites/juventud/.content/galerias/cultura/Programacion-Febrero-27.pdf
