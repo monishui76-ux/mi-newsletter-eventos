@@ -197,12 +197,12 @@ def generate_hash(e):
     return hashlib.md5(f"{title}-{date_info}-{source}".encode('utf-8')).hexdigest()
 
 def summarize_and_order_events_with_gemini(all_events, history):
-    # --- VERSIÓN NEWSLETTER: V3.2 - SIN LÍMITES Y BLINDADA ---
+    # --- VERSIÓN NEWSLETTER: V3.3 - REFUERZO VISUAL Y SIN LÍMITES ---
     if not all_events: return "<p>No se han encontrado eventos vigentes esta semana.</p>"
     
     hoy_str = datetime.now().strftime('%d/%m/%Y')
     
-    # Procesar eventos para el prompt de forma compacta para no saturar el contexto
+    # Procesar eventos para el prompt de forma compacta
     txt = ""
     for e in all_events:
         h = generate_hash(e)
@@ -216,27 +216,35 @@ def summarize_and_order_events_with_gemini(all_events, history):
     prompt = f"""Actúa como un editor cultural experto de Málaga. Hoy es {hoy_str}.
     Genera una newsletter profesional e interactiva en HTML con una tabla elegante.
     
-    REGLAS ESTRICTAS DE EXHAUSTIVIDAD Y FORMATO:
-    1. SIN LÍMITES: Incluye absolutamente TODOS los eventos listados a continuación. No omitas ninguno por longitud de la lista.
-    2. INTRODUCCIÓN: Saludo amigable a los malagueños.
-    3. TABLA HTML: Tabla (<table>) con estilos CSS INLINE.
-    4. COLUMNAS: "Estado", "Categoría", "Fechas", "Evento / Exposición", "Descripción", "Enlace" y "Calendario".
-    5. ESTADO: Usa "✨ Novedad" o "📌 Recordatorio".
-    6. CATEGORÍAS: Usa emojis (🎭, 🎨, 🎶, 🎬, 📚, 🏛️, 👨‍👩‍👧‍👦, 🍷, 🌟).
-    7. CALENDARIO: Enlace clicable "📅 Añadir" a Google Calendar.
+    INSTRUCCIONES CRUCIALES DE FORMATO:
+    1. CATEGORIZACIÓN OBLIGATORIA: Cada evento DEBE tener un emoji de categoría (🎭 Teatro, 🎨 Arte, 🎶 Música, 🎬 Cine, 🏛️ Museos, 👨‍👩‍👧‍👦 Familiar, 🍷 Gastronomía, 🌟 Otros).
+    2. CALENDARIO OBLIGATORIO: Cada evento DEBE tener un enlace '📅 Añadir' a Google Calendar.
        Formato: https://www.google.com/calendar/render?action=TEMPLATE&text=[TITULO_CODIFICADO]&details=[ENLACE_CODIFICADO]&location=Málaga
-    8. FILTRADO: Mantén eventos futuros y exposiciones vigentes. Elimina lo finalizado antes de hoy ({hoy_str}).
-    9. ORDEN: Ordena por fecha de inicio (de más cercano a más lejano).
-    10. DESPEDIDA: Cálida y profesional.
+    3. SIN LÍMITES: Procesa absolutamente TODOS los eventos de la lista de abajo. No omitas ninguno.
+    4. TABLA HTML: Genera una tabla (<table>) con estilos CSS INLINE, bordes suaves y fuentes limpias.
+    5. COLUMNAS: Estado, Categoría, Fechas, Evento, Descripción, Enlace, Calendario.
     
-    Lista completa de eventos a procesar:
+    EJEMPLO DE FILA ESPERADA:
+    <tr>
+      <td>✨ Novedad</td>
+      <td>🎶 Música</td>
+      <td>25/04/2026</td>
+      <td>Concierto Orquesta</td>
+      <td>Un concierto único en el centro...</td>
+      <td><a href="URL">Ver más</a></td>
+      <td><a href="https://www.google.com/calendar/render?action=TEMPLATE&text=Concierto+Orquesta&details=URL&location=Malaga">📅 Añadir</a></td>
+    </tr>
+
+    LISTA DE EVENTOS A PROCESAR:
     {txt}
     """
     
     try:
-        # Usamos un modelo con mayor capacidad de respuesta para listas largas
         response = modelo_final.generate_content(prompt)
         clean_res = response.text.replace('```html', '').replace('```', '').strip()
+        # Asegurarse de que el HTML empiece con algo razonable
+        if not clean_res.startswith('<'):
+            clean_res = f"<p>Newsletter de Málaga - {hoy_str}</p>" + clean_res
         return clean_res
     except Exception as err:
         return f"<p>ERROR AL GENERAR NEWSLETTER: {str(err)}</p>"
@@ -282,14 +290,12 @@ if __name__ == "__main__":
                 current_hashes.add(h)
     print(f"Web Scraping procesado. Eventos totales: {len(all_ev)}")
     
-    # Ordenar por fecha de publicación para RSS o por defecto al final
     all_ev.sort(key=lambda x: x.get('date_pub') if x.get('date_pub') else datetime.max)
     
     print("Generando contenido de la newsletter con Gemini...")
     content = summarize_and_order_events_with_gemini(all_ev, history)
-    send_email("Tu Newsletter de Eventos en Málaga - V3.2 Sin Límites", content)
+    send_email("Tu Newsletter de Eventos en Málaga - V3.3 Visual", content)
     
-    # Actualizar historial (mantener últimos 500)
     updated_history = list(set(history + list(current_hashes)))[-500:]
     save_history(updated_history)
     print("Historial actualizado.")
