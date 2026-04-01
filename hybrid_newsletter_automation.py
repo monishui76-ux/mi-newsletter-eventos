@@ -1,5 +1,6 @@
 import os
 import time
+import re
 # Evitar errores de cabeceras técnicas en GitHub Actions
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
@@ -16,22 +17,38 @@ from email.mime.multipart import MIMEMultipart
 import feedparser
 from datetime import datetime
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote
 import hashlib
 import json
 
 # --- CONFIGURACIÓN PARA GEMINI 2.5 / 3 ---
 SOURCES_FILE = 'sources.txt'
+HISTORY_FILE = 'history.json'
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 modelo_final = genai.GenerativeModel("gemini-2.5-flash")
 
-# Lista de palabras clave para identificar enlaces de agenda/eventos
 EVENT_KEYWORDS = ['agenda', 'eventos', 'programacion', 'exposiciones', 'actividades', 'calendario']
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_history(history_list):
+    try:
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(history_list, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error guardando historial: {e}")
 
 def get_sources(file_path):
     rss_feeds, web_urls = [], []
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
@@ -68,13 +85,25 @@ def find_event_links(base_url, soup, visited_urls):
         full_url = urljoin(base_url, href)
         parsed_url = urlparse(full_url)
 
-        # Asegurarse de que el enlace es del mismo dominio y no ha sido visitado
         if parsed_url.netloc == base_domain and full_url not in visited_urls:
-            # Comprobar si el texto del enlace o la URL contiene palabras clave
-            if any(keyword in a_tag.get_text().lower() for keyword in EVENT_KEYWORDS) or \
+            link_text = a_tag.get_text().lower()
+            if any(keyword in link_text for keyword in EVENT_KEYWORDS) or \
                any(keyword in full_url.lower() for keyword in EVENT_KEYWORDS):
                 found_links.add(full_url)
     return list(found_links)
+
+def clean_json_response(text):
+    """Limpia la respuesta de Gemini para extraer solo el bloque JSON."""
+    try:
+        # Buscar el primer '[' y el último ']'
+        start = text.find('[')
+        end = text.rfind(']') + 1
+        if start != -1 and end != 0:
+            json_str = text[start:end]
+            return json.loads(json_str)
+    except Exception as e:
+        print(f"Error parseando JSON de Gemini: {e}")
+    return []
 
 def scrape_web_with_gemini(url):
     events = []
@@ -93,22 +122,28 @@ def scrape_web_with_gemini(url):
         visited_urls.add(current_url)
 
         try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            resp = requests.get(current_url, headers=headers, timeout=15, verify=False)
+            # Cabeceras más realistas para evitar bloqueos (como El Corte Inglés)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'es-ES,es;q=0.9',
+                'Referer': 'https://www.google.com/'
+            }
+            # Aumentamos el timeout a 30 segundos para webs lentas
+            resp = requests.get(current_url, headers=headers, timeout=30, verify=False)
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # Extraer URLs de imágenes
+            # Extraer imágenes relevantes
             for img_tag in soup.find_all('img', src=True):
                 img_src = img_tag['src']
                 full_img_url = urljoin(current_url, img_src)
-                # Filtrar imágenes pequeñas o irrelevantes (ej. iconos)
                 if not any(ext in full_img_url.lower() for ext in ['.gif', '.svg', '.ico']) and \
                    'logo' not in full_img_url.lower() and 'icon' not in full_img_url.lower():
                     all_image_urls.append(full_img_url)
 
-            for s in soup(["script", "style", "header", "footer", "nav"]): s.extract()
+            # Limpieza agresiva de HTML para dejar solo el contenido central
+            for s in soup(["script", "style", "header", "footer", "nav", "aside", "form"]): s.extract()
             clean_text = " ".join(soup.get_text().split())
-            all_text_content += clean_text + "\n\n"
+            all_text_content += f"\n--- CONTENIDO DE {current_url} ---\n{clean_text}\n"
 
             if current_depth < MAX_DEPTH:
                 new_links = find_event_links(current_url, soup, visited_urls)
@@ -121,94 +156,63 @@ def scrape_web_with_gemini(url):
             print(f"Error scraping {current_url}: {e}")
             continue
 
-    MAX_GEMINI_INPUT_LENGTH = 25000
-    text_chunks = [all_text_content[i:i + MAX_GEMINI_INPUT_LENGTH] for i in range(0, len(all_text_content), MAX_GEMINI_INPUT_LENGTH)]
+    # Procesamiento por bloques (Chunks)
+    MAX_CHUNK_SIZE = 15000
+    text_chunks = [all_text_content[i:i + MAX_CHUNK_SIZE] for i in range(0, len(all_text_content), MAX_CHUNK_SIZE)]
     
-    # Preparar partes para Gemini (texto e imágenes)
-    gemini_parts = []
-    for chunk in text_chunks:
-        gemini_parts.append(chunk)
-    
-    # Añadir imágenes, limitando para no exceder el contexto de Gemini
-    # Gemini 2.5 Flash tiene un límite de contexto muy alto, pero es bueno ser precavido
-    # Limitar a 5 imágenes por URL principal para evitar sobrecarga
-    for img_url in all_image_urls[:5]: 
-        gemini_parts.append(genai.upload_file(img_url))
-
-    prompt_text = f"""Analiza este contenido (texto e imágenes) de una web cultural de Málaga. Hoy es {hoy}.
-        Extrae los eventos que CUMPLAN ALGUNA de estas condiciones:
-        1. Eventos que ocurrirán en el futuro.
-        2. Eventos o exposiciones que ya han comenzado pero que SIGUEN VIGENTES hoy (tienen una duración de varios días/meses).
+    for i, chunk in enumerate(text_chunks):
+        gemini_parts = [f"Analiza este contenido de una web cultural de Málaga. Hoy es {hoy}. Extrae eventos futuros o vigentes.\n\nTexto:\n{chunk}"]
         
-        Devuelve un JSON: [{{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}}]
-        En \'date_info\', indica el rango de fechas o la fecha específica. Si no hay enlace específico para el evento, usa el enlace de la web principal.
-        Si la información del evento proviene de una imagen, indícalo en el resumen.
-        
-        Contenido a analizar:
-        """
-    
-    # Combinar el prompt con las partes de texto e imagen
-    full_gemini_input = [prompt_text] + gemini_parts
+        # Solo añadimos imágenes en el primer bloque para no saturar
+        if i == 0:
+            for img_url in all_image_urls[:5]:
+                try:
+                    gemini_parts.append(genai.upload_file(img_url))
+                except: pass
 
-    try:
-        res = modelo_final.generate_content(full_gemini_input)
-        data = json.loads(res.text.replace('```json', '').replace('```', '').strip())
-        for e in data:
-            e['source'], e['type'] = url, 'web'
-            events.append(e)
-    except Exception as e:
-        print(f"Error con Gemini en scraping multimodal: {e}")
-        # Intentar con solo texto si falla el multimodal
+        prompt = """Devuelve un JSON con esta estructura exacta: [{'title': '...', 'date_info': '...', 'summary': '...', 'link': '...'}]
+        Si no hay enlace específico, usa el de la web de origen. No incluyas texto fuera del JSON."""
+        
         try:
-            prompt_text_fallback = f"""Analiza este texto de una web cultural de Málaga. Hoy es {hoy}.
-                Extrae los eventos que CUMPLAN ALGUNA de estas condiciones:
-                1. Eventos que ocurrirán en el futuro.
-                2. Eventos o exposiciones que ya han comenzado pero que SIGUEN VIGENTES hoy (tienen una duración de varios días/meses).
-                
-                Devuelve un JSON: [{{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}}]
-                En \'date_info\', indica el rango de fechas o la fecha específica. Si no hay enlace específico para el evento, usa el enlace de la web principal.
-                
-                Texto a analizar:
-                {all_text_content[:MAX_GEMINI_INPUT_LENGTH]}
-                """
-            res_fallback = modelo_final.generate_content(prompt_text_fallback)
-            data_fallback = json.loads(res_fallback.text.replace('```json', '').replace('```', '').strip())
-            for e in data_fallback:
-                e['source'], e['type'] = url, 'web'
+            res = modelo_final.generate_content(gemini_parts + [prompt])
+            data = clean_json_response(res.text)
+            for e in data:
+                e['source'] = url
                 events.append(e)
-        except Exception as e_fallback:
-            print(f"Error con Gemini en scraping solo texto (fallback): {e_fallback}")
-            pass
+        except Exception as e:
+            print(f"Error con Gemini en chunk {i}: {e}")
+            
     return events
 
 def generate_hash(e):
-    date_info = e.get('date_info', '')
-    return hashlib.md5(f"{e['title']}-{date_info}".encode()).hexdigest()
+    title = e.get('title', '').strip()
+    date_info = e.get('date_info', '').strip()
+    return hashlib.md5(f"{title}-{date_info}".encode('utf-8')).hexdigest()
 
-def summarize_and_order_events_with_gemini(all_events):
+def summarize_and_order_events_with_gemini(all_events, history):
     if not all_events: return "<p>No se han encontrado eventos vigentes esta semana.</p>"
     
     hoy_str = datetime.now().strftime('%d/%m/%Y')
     txt = ""
     for e in all_events:
-        date_info = e.get('date_info', 'Consultar web')
-        txt += f"- Evento: {e['title']} | Fechas: {date_info} | Fuente: {e['source']} | Resumen: {e['summary'][:150]}... | Link: {e['link']}\n"
+        h = generate_hash(e)
+        estado = "RECORDATORIO" if h in history else "NOVEDAD"
+        txt += f"- [{estado}] Evento: {e['title']} | Fechas: {e.get('date_info', 'Consultar')} | Fuente: {e.get('source', 'Web')} | Resumen: {e.get('summary', '')[:150]}... | Link: {e.get('link', '')}\n"
 
-    prompt = f"""Actúa como un editor cultural experto de Málaga. Hoy es {hoy_str}.
-Tu misión es redactar una newsletter profesional y amigable.
-
-INSTRUCCIONES DE FILTRADO Y DISEÑO:
-1. MANTÉN los eventos futuros Y las exposiciones que ya han empezado pero que TODAVÍA se pueden visitar hoy.
-2. ELIMINA cualquier evento que ya haya finalizado por completo antes de hoy ({hoy_str}).
-3. ORDENA los eventos por fecha de inicio (de más cercano a más lejano).
-4. FORMATO: Devuelve el contenido en HTML elegante.
-5. Usa una TABLA (<table>) con columnas: "Fechas", "Evento / Exposición", "Descripción" y "Enlace".
-6. Aplica estilos CSS en línea: tabla con bordes colapsados, fondo gris claro para el encabezado, padding en las celdas y fuentes limpias (Arial/sans-serif).
-7. Incluye una introducción saludando a los malagueños y una despedida calurosa.
-
-Eventos detectados:
-{txt}
-"""
+    prompt = f"""Actúa como editor cultural de Málaga. Hoy es {hoy_str}.
+    Genera una newsletter profesional en HTML con una tabla elegante.
+    
+    REGLAS:
+    1. CATEGORÍAS: Asigna (🎭 Teatro, 🎨 Arte, 🎶 Música, 🎬 Cine, 📚 Libros, 🏛️ Museos, 👨‍👩‍👧‍👦 Familiar, 🍷 Gastronomía, 🌟 Otros).
+    2. ESTADO: Indica si es "✨ Novedad" o "📌 Recordatorio" según el prefijo [NOVEDAD] o [RECORDATORIO].
+    3. CALENDARIO: Genera enlaces de Google Calendar: https://www.google.com/calendar/render?action=TEMPLATE&text=[TITULO]&details=[LINK]&location=Malaga
+    4. TABLA: Columnas (Estado, Categoría, Fechas, Evento, Descripción, Enlace, Calendario).
+    5. ESTILO: CSS inline, bordes finos, fuentes limpias, colores suaves.
+    6. MANTÉN eventos vigentes (exposiciones) y futuros. ELIMINA pasados.
+    
+    Eventos:
+    {txt}
+    """
     
     try:
         response = modelo_final.generate_content(prompt)
@@ -221,32 +225,41 @@ def send_email(subject, content):
     if not user or not pwd: return
     msg = MIMEMultipart("alternative")
     msg["From"], msg["To"], msg["Subject"] = user, user, subject
-    
     msg.attach(MIMEText(content, "html"))
     
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(user, pwd)
             server.send_message(msg)
-        print("Newsletter enviada con éxito!")
+        print("Newsletter enviada!")
     except Exception as e:
-        print(f"Error al enviar email: {e}")
+        print(f"Error email: {e}")
 
 if __name__ == "__main__":
+    history = load_history()
     rss_urls, web_urls = get_sources(SOURCES_FILE)
-    all_ev, hashes = [], set()
+    all_ev, current_hashes = [], set()
     
+    # Procesar RSS
     for u in rss_urls:
         for e in parse_rss_feed(u):
             h = generate_hash(e)
-            if h not in hashes: all_ev.append(e); hashes.add(h)
+            if h not in current_hashes:
+                all_ev.append(e)
+                current_hashes.add(h)
     
+    # Procesar Webs
     for u in web_urls:
         for e in scrape_web_with_gemini(u):
             h = generate_hash(e)
-            if h not in hashes: all_ev.append(e); hashes.add(h)
+            if h not in current_hashes:
+                all_ev.append(e)
+                current_hashes.add(h)
     
-    all_ev.sort(key=lambda x: x['date_pub'] if x['date_pub'] else datetime.max) # Ordenar por fecha de publicación para RSS
+    # Generar y enviar
+    content = summarize_and_order_events_with_gemini(all_ev, history)
+    send_email("Tu Newsletter de Eventos en Málaga", content)
     
-    content = summarize_and_order_events_with_gemini(all_ev)
-    send_email("Tu Newsletter de Eventos y Exposiciones en Málaga", content)
+    # Actualizar historial (mantener últimos 500)
+    updated_history = list(set(history + list(current_hashes)))[-500:]
+    save_history(updated_history)
