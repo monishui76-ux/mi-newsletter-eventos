@@ -176,8 +176,7 @@ def scrape_web_with_gemini(url):
                     print(f"Error subiendo imagen {img_url}: {e}")
                     pass
 
-        prompt = """Devuelve un JSON con esta estructura exacta: [{'title': '...', 'date_info': '...', 'summary': '...', 'link': '...'}]
-        INSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
+        prompt = """Devuelve un JSON con esta estructura exacta: [{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}]\nINSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
         
         try:
             res = modelo_final.generate_content(gemini_parts + [prompt])
@@ -197,7 +196,7 @@ def generate_hash(e):
     return hashlib.md5(f"{title}-{date_info}-{source}".encode('utf-8')).hexdigest()
 
 def summarize_and_order_events_with_gemini(all_events, history):
-    # --- VERSIÓN NEWSLETTER: V3.3 - REFUERZO VISUAL Y SIN LÍMITES ---
+    # --- VERSIÓN NEWSLETTER: V4.0 - ULTRA-EXHAUSTIVA Y SIN ADORNOS ---
     if not all_events: return "<p>No se han encontrado eventos vigentes esta semana.</p>"
     
     hoy_str = datetime.now().strftime('%d/%m/%Y')
@@ -214,35 +213,25 @@ def summarize_and_order_events_with_gemini(all_events, history):
         txt += f"[{estado}] {title} | {date_info} | {e.get('source', 'Web')} | {summary[:100]}... | {link}\n"
 
     prompt = f"""Actúa como un editor cultural experto de Málaga. Hoy es {hoy_str}.
-    Genera una newsletter profesional e interactiva en HTML con una tabla elegante.
+    Genera una newsletter profesional en HTML con una tabla elegante.
     
-    INSTRUCCIONES CRUCIALES DE FORMATO:
-    1. CATEGORIZACIÓN OBLIGATORIA: Cada evento DEBE tener un emoji de categoría (🎭 Teatro, 🎨 Arte, 🎶 Música, 🎬 Cine, 🏛️ Museos, 👨‍👩‍👧‍👦 Familiar, 🍷 Gastronomía, 🌟 Otros).
-    2. CALENDARIO OBLIGATORIO: Cada evento DEBE tener un enlace '📅 Añadir' a Google Calendar.
-       Formato: https://www.google.com/calendar/render?action=TEMPLATE&text=[TITULO_CODIFICADO]&details=[ENLACE_CODIFICADO]&location=Málaga
-    3. SIN LÍMITES: Procesa absolutamente TODOS los eventos de la lista de abajo. No omitas ninguno.
-    4. TABLA HTML: Genera una tabla (<table>) con estilos CSS INLINE, bordes suaves y fuentes limpias.
-    5. COLUMNAS: Estado, Categoría, Fechas, Evento, Descripción, Enlace, Calendario.
+    REGLAS ESTRICTAS DE EXHAUSTIVIDAD Y FORMATO:
+    1. SIN LÍMITES: Incluye absolutamente TODOS los eventos listados a continuación. No omitas ninguno por longitud de la lista.
+    2. INTRODUCCIÓN: Saludo amigable a los malagueños.
+    3. TABLA HTML: Tabla (<table>) con estilos CSS INLINE, bordes suaves y fuentes limpias.
+    4. COLUMNAS: "Estado", "Fechas", "Evento / Exposición", "Descripción", "Enlace".
+    5. ESTADO: Usa "✨ Novedad" o "📌 Recordatorio".
+    6. FILTRADO: Mantén eventos futuros y exposiciones vigentes. Elimina lo finalizado antes de hoy ({hoy_str}).
+    7. ORDEN: Ordena los eventos por fecha de inicio (de más cercano a más lejano).
+    8. DESPEDIDA: Cálida y profesional.
     
-    EJEMPLO DE FILA ESPERADA:
-    <tr>
-      <td>✨ Novedad</td>
-      <td>🎶 Música</td>
-      <td>25/04/2026</td>
-      <td>Concierto Orquesta</td>
-      <td>Un concierto único en el centro...</td>
-      <td><a href="URL">Ver más</a></td>
-      <td><a href="https://www.google.com/calendar/render?action=TEMPLATE&text=Concierto+Orquesta&details=URL&location=Malaga">📅 Añadir</a></td>
-    </tr>
-
-    LISTA DE EVENTOS A PROCESAR:
+    Lista completa de eventos a procesar:
     {txt}
     """
     
     try:
         response = modelo_final.generate_content(prompt)
         clean_res = response.text.replace('```html', '').replace('```', '').strip()
-        # Asegurarse de que el HTML empiece con algo razonable
         if not clean_res.startswith('<'):
             clean_res = f"<p>Newsletter de Málaga - {hoy_str}</p>" + clean_res
         return clean_res
@@ -294,7 +283,7 @@ if __name__ == "__main__":
     
     print("Generando contenido de la newsletter con Gemini...")
     content = summarize_and_order_events_with_gemini(all_ev, history)
-    send_email("Tu Newsletter de Eventos en Málaga - V3.3 Visual", content)
+    send_email("Tu Newsletter de Eventos en Málaga - V4.0 Ultra-Exhaustiva", content)
     
     updated_history = list(set(history + list(current_hashes)))[-500:]
     save_history(updated_history)
