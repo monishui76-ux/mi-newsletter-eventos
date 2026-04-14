@@ -3,7 +3,7 @@ name: Newsletter Malaga V4 - Ultra-Exhaustiva
 on:
   schedule:
     # Prueba para mañana (Martes) a las 7:00 AM de España (5:00 AM UTC en verano)
-    - cron: '0 5 * * 2'
+    - cron: '0 5 * * 3'
     # Envío semanal los viernes a las 7:00 AM de España (5:00 AM UTC en verano)
     - cron: '0 5 * * 5'
   workflow_dispatch: # Permite ejecutarlo manualmente para pruebas
