@@ -176,7 +176,8 @@ def scrape_web_with_gemini(url):
                     print(f"Error subiendo imagen {img_url}: {e}")
                     pass
 
-        prompt = """Devuelve un JSON con esta estructura exacta: [{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}]\nINSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
+        prompt = """Devuelve un JSON con esta estructura exacta: [{'title': '...', 'date_info': '...', 'summary': '...', 'link': '...'}]
+        INSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
         
         try:
             res = modelo_final.generate_content(gemini_parts + [prompt])
