@@ -1,7 +1,8 @@
 import os
 import time
 import re
-# Evitar errores de cabeceras técnicas en GitHub Actions
+
+# Evitar errores de cabeceras técnicas
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 
@@ -17,37 +18,15 @@ from email.mime.multipart import MIMEMultipart
 import feedparser
 from datetime import datetime
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, quote
-import hashlib
+from urllib.parse import urljoin, urlparse
 import json
 
 # --- CONFIGURACIÓN PARA GEMINI 2.5 / 3 ---
 SOURCES_FILE = 'sources.txt'
-HISTORY_FILE = 'history.json'
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 modelo_final = genai.GenerativeModel("gemini-2.5-flash")
 
 EVENT_KEYWORDS = ['agenda', 'eventos', 'programacion', 'exposiciones', 'actividades', 'calendario']
-
-def load_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            print(f"Error: El archivo {HISTORY_FILE} no es un JSON válido. Se creará uno nuevo.")
-            return []
-        except Exception as e:
-            print(f"Error cargando historial: {e}")
-            return []
-    return []
-
-def save_history(history_list):
-    try:
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(history_list, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Error guardando historial: {e}")
 
 def get_sources(file_path):
     rss_feeds, web_urls = [], []
@@ -152,7 +131,7 @@ def scrape_web_with_gemini(url):
                 urls_to_scrape.extend(new_links)
                 current_depth += 1
             
-            time.sleep(1)
+            time.sleep(1) # Pausa para evitar bloqueos
 
         except requests.exceptions.Timeout:
             print(f"Timeout al raspar {current_url}. Saltando.")
@@ -169,15 +148,14 @@ def scrape_web_with_gemini(url):
         gemini_parts = [f"Analiza este contenido de una web cultural de Málaga. Hoy es {hoy}. Extrae TODOS los eventos futuros o vigentes sin excepción.\n\nTexto:\n{chunk}"]
         
         if i == 0:
-            for img_url in all_image_urls[:5]:
+            for img_url in all_image_urls[:5]: # Limitar imágenes para ahorrar tokens
                 try:
                     gemini_parts.append(genai.upload_file(img_url))
                 except Exception as e:
                     print(f"Error subiendo imagen {img_url}: {e}")
                     pass
 
-        prompt = """Devuelve un JSON con esta estructura exacta: [{'title': '...', 'date_info': '...', 'summary': '...', 'link': '...'}]
-        INSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
+        prompt = """Devuelve un JSON con esta estructura exacta: [{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}]\nINSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
         
         try:
             res = modelo_final.generate_content(gemini_parts + [prompt])
@@ -187,31 +165,25 @@ def scrape_web_with_gemini(url):
                 events.append(e)
         except Exception as e:
             print(f"Error con Gemini en chunk {i}: {e}\nRespuesta cruda: {getattr(res, 'text', 'N/A')[:500]}...")
+        
+        time.sleep(5) # Pausa para respetar límites de la API gratuita
             
     return events
 
-def generate_hash(e):
-    title = e.get('title', '').strip()
-    date_info = e.get('date_info', '').strip()
-    source = e.get('source', '').strip()
-    return hashlib.md5(f"{title}-{date_info}-{source}".encode('utf-8')).hexdigest()
-
-def summarize_and_order_events_with_gemini(all_events, history):
-    # --- VERSIÓN NEWSLETTER: V4.0 - ULTRA-EXHAUSTIVA Y SIN ADORNOS ---
+def summarize_and_order_events_with_gemini(all_events):
+    # --- VERSIÓN NEWSLETTER: V5.0 - MANUAL Y EXHAUSTIVA ---
     if not all_events: return "<p>No se han encontrado eventos vigentes esta semana.</p>"
     
     hoy_str = datetime.now().strftime('%d/%m/%Y')
     
-    # Procesar eventos para el prompt de forma compacta
+    # Formatear eventos para el prompt de forma compacta
     txt = ""
     for e in all_events:
-        h = generate_hash(e)
-        estado = "RECORDATORIO" if h in history else "NOVEDAD"
         date_info = e.get('date_info', 'Consultar web')
         link = e.get('link', e.get('source', '#'))
         summary = e.get('summary', '')
         title = e.get('title', 'Evento sin título')
-        txt += f"[{estado}] {title} | {date_info} | {e.get('source', 'Web')} | {summary[:100]}... | {link}\n"
+        txt += f"- Título: {title} | Fechas: {date_info} | Fuente: {e.get('source', 'Web')} | Resumen: {summary[:100]}... | Enlace: {link}\n"
 
     prompt = f"""Actúa como un editor cultural experto de Málaga. Hoy es {hoy_str}.
     Genera una newsletter profesional en HTML con una tabla elegante.
@@ -220,11 +192,10 @@ def summarize_and_order_events_with_gemini(all_events, history):
     1. SIN LÍMITES: Incluye absolutamente TODOS los eventos listados a continuación. No omitas ninguno por longitud de la lista.
     2. INTRODUCCIÓN: Saludo amigable a los malagueños.
     3. TABLA HTML: Tabla (<table>) con estilos CSS INLINE, bordes suaves y fuentes limpias.
-    4. COLUMNAS: "Estado", "Fechas", "Evento / Exposición", "Descripción", "Enlace".
-    5. ESTADO: Usa "✨ Novedad" o "📌 Recordatorio".
-    6. FILTRADO: Mantén eventos futuros y exposiciones vigentes. Elimina lo finalizado antes de hoy ({hoy_str}).
-    7. ORDEN: Ordena los eventos por fecha de inicio (de más cercano a más lejano).
-    8. DESPEDIDA: Cálida y profesional.
+    4. COLUMNAS: "Fechas", "Evento / Exposición", "Descripción", "Enlace".
+    5. FILTRADO: Mantén eventos futuros y exposiciones vigentes. Elimina lo finalizado antes de hoy ({hoy_str}).
+    6. ORDEN: Ordena los eventos por fecha de inicio (de más cercano a más lejano).
+    7. DESPEDIDA: Cálida y profesional.
     
     Lista completa de eventos a procesar:
     {txt}
@@ -258,34 +229,52 @@ def send_email(subject, content):
         print(f"Error al enviar email: {e}")
 
 if __name__ == "__main__":
-    history = load_history()
     rss_urls, web_urls = get_sources(SOURCES_FILE)
-    all_ev, current_hashes = [], set()
+    all_ev = []
     
     print("Iniciando procesamiento de RSS...")
     for u in rss_urls:
         for e in parse_rss_feed(u):
-            h = generate_hash(e)
-            if h not in current_hashes:
-                all_ev.append(e)
-                current_hashes.add(h)
+            all_ev.append(e)
     print(f"RSS procesados. Eventos encontrados: {len(all_ev)}")
 
     print("Iniciando procesamiento de Web Scraping...")
     for u in web_urls:
         for e in scrape_web_with_gemini(u):
-            h = generate_hash(e)
-            if h not in current_hashes:
-                all_ev.append(e)
-                current_hashes.add(h)
+            all_ev.append(e)
     print(f"Web Scraping procesado. Eventos totales: {len(all_ev)}")
     
-    all_ev.sort(key=lambda x: x.get('date_pub') if x.get('date_pub') else datetime.max)
+    # Eliminar duplicados después de recolectar todo
+    unique_events = {}
+    for event in all_ev:
+        title = event.get('title', '').strip().lower()
+        date_info = event.get('date_info', '').strip().lower()
+        # Usar una combinación de título y fecha para la deduplicación
+        key = f"{title}-{date_info}"
+        if key not in unique_events:
+            unique_events[key] = event
+    all_ev = list(unique_events.values())
+
+    # Filtrar eventos pasados y ordenar
+    filtered_events = []
+    hoy = datetime.now().date()
+    for event in all_ev:
+        # Intentar parsear la fecha para filtrar
+        date_str = event.get('date_info', '')
+        event_date = None
+        try:
+            # Asumimos que date_info puede ser 'DD/MM/YYYY' o 'YYYY-MM-DD'
+            if '/' in date_str: event_date = datetime.strptime(date_str.split(' ')[0], '%d/%m/%Y').date()
+            elif '-' in date_str: event_date = datetime.strptime(date_str.split(' ')[0], '%Y-%m-%d').date()
+        except ValueError: pass # Si no se puede parsear, se asume vigente
+
+        if event_date is None or event_date >= hoy:
+            filtered_events.append(event)
+    
+    filtered_events.sort(key=lambda x: x.get('date_pub') if x.get('date_pub') else datetime.max)
     
     print("Generando contenido de la newsletter con Gemini...")
-    content = summarize_and_order_events_with_gemini(all_ev, history)
-    send_email("Tu Newsletter de Eventos en Málaga - V4.0 Ultra-Exhaustiva", content)
+    content = summarize_and_order_events_with_gemini(filtered_events)
+    send_email("Tu Newsletter de Eventos en Málaga - V5.0 Manual & Exhaustiva", content)
     
-    updated_history = list(set(history + list(current_hashes)))[-500:]
-    save_history(updated_history)
-    print("Historial actualizado.")
+    print("Proceso completado.")
