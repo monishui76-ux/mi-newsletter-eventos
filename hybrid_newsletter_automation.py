@@ -2,7 +2,8 @@ import os
 import time
 import re
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import threading
+import queue
 
 # Evitar errores de cabeceras técnicas
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -31,13 +32,29 @@ client = genai.Client(
     http_options={"timeout": 120000},  # 120 segundos, en milisegundos (mejor esfuerzo del propio SDK)
 )
 
-# Red de seguridad adicional: si el SDK no respeta su propio timeout (es un bug conocido),
-# esto obliga a que cualquier llamada a Gemini se cancele igualmente pasado el tiempo indicado.
-_executor = ThreadPoolExecutor(max_workers=4)
-
 def call_with_timeout(func, timeout_seconds, *args, **kwargs):
-    future = _executor.submit(func, *args, **kwargs)
-    return future.result(timeout=timeout_seconds)
+    """Ejecuta func en un hilo propio y lo abandona si tarda más de timeout_seconds.
+    Cada llamada usa un hilo nuevo (nunca comparte uno con otras), así que una
+    llamada que se quede colgada para siempre no bloquea a las siguientes."""
+    result_queue = queue.Queue()
+
+    def target():
+        try:
+            result_queue.put(("ok", func(*args, **kwargs)))
+        except Exception as e:
+            result_queue.put(("error", e))
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_seconds)
+
+    if thread.is_alive():
+        raise TimeoutError(f"La llamada a Gemini superó los {timeout_seconds}s y se ha abandonado.")
+
+    status, value = result_queue.get()
+    if status == "error":
+        raise value
+    return value
 
 EVENT_KEYWORDS = ['agenda', 'eventos', 'programacion', 'exposiciones', 'actividades', 'calendario']
 
