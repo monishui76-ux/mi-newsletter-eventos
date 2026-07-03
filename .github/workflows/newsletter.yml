@@ -48,7 +48,7 @@ jobs:
           python-version: '3.11'
 
       # Paso 3: Instalar las librerías necesarias
-            - name: Instalar herramientas
+      - name: Instalar herramientas
         if: steps.check_time.outputs.debe_ejecutar == 'true'
         run: |
           python -m pip install --upgrade pip
