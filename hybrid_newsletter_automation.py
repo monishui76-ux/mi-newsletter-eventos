@@ -157,6 +157,7 @@ def scrape_web_with_gemini(url):
 
         prompt = """Devuelve un JSON con esta estructura exacta: [{\'title\': \'...\', \'date_info\': \'...\', \'summary\': \'...\', \'link\': \'...\'}]\nINSTRUCCIÓN CRUCIAL: No resumas. Extrae CADA evento que encuentres en el texto. No incluyas texto fuera del JSON."""
         
+        res = None
         try:
             res = modelo_final.generate_content(gemini_parts + [prompt])
             data = clean_json_response(res.text)
