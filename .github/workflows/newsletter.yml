@@ -2,40 +2,56 @@ name: Newsletter Malaga V4 - Ultra-Exhaustiva
 
 on:
   schedule:
-    # --- PROGRAMACIÓN SOLICITADA ---
-    # Para mañana (Martes) a las 7:00 AM de España (5:00 AM UTC en verano)
-    - cron: '0 5 * * 3'
-    # Envío semanal los viernes a las 7:00 AM de España (5:00 AM UTC en verano)
-    - cron: '0 5 * * 5'
+    # Domingo 7:00 Madrid en horario de VERANO (CEST, UTC+2)
+    - cron: '0 5 * * 0'
+    # Domingo 7:00 Madrid en horario de INVIERNO (CET, UTC+1)
+    - cron: '0 6 * * 0'
   workflow_dispatch: # Permite ejecutarlo manualmente para pruebas
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     # Esta variable es vital para evitar avisos de Node.js en 2026
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      # Paso 0: Comprobar que realmente son las 7:00 en Madrid
+      # (uno de los dos crons de arriba es siempre "el que no toca" según la época del año)
+      - name: Comprobar que son las 7:00 en Madrid
+        id: check_time
+        run: |
+          HORA_MADRID=$(TZ='Europe/Madrid' date +%H)
+          if [ "$HORA_MADRID" = "07" ]; then
+            echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "debe_ejecutar=false" >> "$GITHUB_OUTPUT"
+            echo "No son las 7:00 en Madrid (son las $HORA_MADRID:00). Este disparo no corresponde, se omite."
+          fi
+
       # Paso 1: Descargar el código de tu repositorio (Versión v4 estable)
       - name: Descargar código
+        if: steps.check_time.outputs.debe_ejecutar == 'true'
         uses: actions/checkout@v4
 
       # Paso 2: Configurar el entorno de Python (Versión v5 estable)
       - name: Configurar Python
+        if: steps.check_time.outputs.debe_ejecutar == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       # Paso 3: Instalar las librerías necesarias
       - name: Instalar herramientas
+        if: steps.check_time.outputs.debe_ejecutar == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -U "google-generativeai>=0.8.0" requests feedparser beautifulsoup4
 
       # Paso 4: Ejecutar el script híbrido
       - name: Ejecutar programa
+        if: steps.check_time.outputs.debe_ejecutar == 'true'
         env:
           # Aquí es donde GitHub lee tus "Secrets" guardados en Settings
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -46,6 +62,7 @@ jobs:
       # Paso 5: Guardar el historial (history.json) en el repositorio
       # Esto es vital para que la "memoria" funcione entre ejecuciones automáticas
       - name: Guardar historial
+        if: steps.check_time.outputs.debe_ejecutar == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
