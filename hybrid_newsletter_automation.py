@@ -92,6 +92,9 @@ def find_event_links(base_url, soup, visited_urls):
 
 def clean_json_response(text):
     """Limpia la respuesta de Gemini para extraer solo el bloque JSON."""
+    if not text:
+        print("Respuesta de Gemini vacía (sin texto). Se omite este chunk.")
+        return []
     match = re.search(r'\s*\[.*?\]\s*', text, re.DOTALL)
     if match:
         json_str = match.group(0)
@@ -204,7 +207,8 @@ def scrape_web_with_gemini(url):
                 e['source'] = url
                 events.append(e)
         except Exception as e:
-            print(f"Error con Gemini en chunk {i}: {e}\nRespuesta cruda: {getattr(res, 'text', 'N/A')[:500]}...")
+            texto_res = getattr(res, 'text', None) or 'N/A'
+            print(f"Error con Gemini en chunk {i}: {e}\nRespuesta cruda: {texto_res[:500]}...")
         
         time.sleep(5) # Pausa para respetar límites de la API gratuita
             
