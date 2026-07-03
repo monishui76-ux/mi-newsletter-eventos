@@ -62,6 +62,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          PYTHONUNBUFFERED: "1"
         run: python hybrid_newsletter_automation.py
 
       # Paso 5: Guardar el historial (history.json) en el repositorio
