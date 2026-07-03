@@ -1,6 +1,8 @@
 import os
 import time
 import re
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Evitar errores de cabeceras técnicas
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -11,7 +13,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 import requests
-import google.generativeai as genai
+from google import genai
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -21,10 +23,21 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import json
 
-# --- CONFIGURACIÓN PARA GEMINI 2.5 / 3 ---
+# --- CONFIGURACIÓN PARA GEMINI (SDK nuevo google-genai) ---
 SOURCES_FILE = 'sources.txt'
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-modelo_final = genai.GenerativeModel("gemini-2.5-flash")
+MODEL_NAME = "gemini-2.5-flash"
+client = genai.Client(
+    api_key=os.environ.get("GEMINI_API_KEY"),
+    http_options={"timeout": 120000},  # 120 segundos, en milisegundos (mejor esfuerzo del propio SDK)
+)
+
+# Red de seguridad adicional: si el SDK no respeta su propio timeout (es un bug conocido),
+# esto obliga a que cualquier llamada a Gemini se cancele igualmente pasado el tiempo indicado.
+_executor = ThreadPoolExecutor(max_workers=4)
+
+def call_with_timeout(func, timeout_seconds, *args, **kwargs):
+    future = _executor.submit(func, *args, **kwargs)
+    return future.result(timeout=timeout_seconds)
 
 EVENT_KEYWORDS = ['agenda', 'eventos', 'programacion', 'exposiciones', 'actividades', 'calendario']
 
@@ -90,6 +103,29 @@ def clean_json_response(text):
         print(f"No se encontró un bloque JSON válido en la respuesta.\nRespuesta completa: {text[:500]}...")
     return []
 
+def download_and_upload_image(img_url):
+    """Descarga la imagen a un archivo temporal y la sube a Gemini (upload necesita un archivo local, no una URL)."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.google.com/'
+    }
+    resp = requests.get(img_url, headers=headers, timeout=15, verify=False)
+    resp.raise_for_status()
+
+    ext = os.path.splitext(urlparse(img_url).path)[1]
+    if not ext or len(ext) > 5:
+        ext = '.jpg'
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_file:
+            tmp_file.write(resp.content)
+            tmp_path = tmp_file.name
+        return call_with_timeout(client.files.upload, 60, file=tmp_path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 def scrape_web_with_gemini(url):
     events = []
     hoy = datetime.now().strftime('%Y-%m-%d')
@@ -150,7 +186,7 @@ def scrape_web_with_gemini(url):
         if i == 0:
             for img_url in all_image_urls[:5]: # Limitar imágenes para ahorrar tokens
                 try:
-                    gemini_parts.append(genai.upload_file(img_url))
+                    gemini_parts.append(download_and_upload_image(img_url))
                 except Exception as e:
                     print(f"Error subiendo imagen {img_url}: {e}")
                     pass
@@ -159,7 +195,10 @@ def scrape_web_with_gemini(url):
         
         res = None
         try:
-            res = modelo_final.generate_content(gemini_parts + [prompt])
+            res = call_with_timeout(
+                client.models.generate_content, 130,
+                model=MODEL_NAME, contents=gemini_parts + [prompt]
+            )
             data = clean_json_response(res.text)
             for e in data:
                 e['source'] = url
@@ -203,7 +242,10 @@ def summarize_and_order_events_with_gemini(all_events):
     """
     
     try:
-        response = modelo_final.generate_content(prompt)
+        response = call_with_timeout(
+            client.models.generate_content, 180,
+            model=MODEL_NAME, contents=prompt
+        )
         clean_res = response.text.replace('```html', '').replace('```', '').strip()
         if not clean_res.startswith('<'):
             clean_res = f"<p>Newsletter de Málaga - {hoy_str}</p>" + clean_res
