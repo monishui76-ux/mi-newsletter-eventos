@@ -18,16 +18,21 @@ jobs:
 
     steps:
       # Paso 0: Comprobar que realmente son las 7:00 en Madrid
-      # (uno de los dos crons de arriba es siempre "el que no toca" según la época del año)
+      # (solo aplica a los disparos automáticos; si lo lanzas tú a mano, siempre se ejecuta)
       - name: Comprobar que son las 7:00 en Madrid
         id: check_time
         run: |
-          HORA_MADRID=$(TZ='Europe/Madrid' date +%H)
-          if [ "$HORA_MADRID" = "07" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
+            echo "Ejecución manual: se omite la comprobación de hora."
           else
-            echo "debe_ejecutar=false" >> "$GITHUB_OUTPUT"
-            echo "No son las 7:00 en Madrid (son las $HORA_MADRID:00). Este disparo no corresponde, se omite."
+            HORA_MADRID=$(TZ='Europe/Madrid' date +%H)
+            if [ "$HORA_MADRID" = "07" ]; then
+              echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "debe_ejecutar=false" >> "$GITHUB_OUTPUT"
+              echo "No son las 7:00 en Madrid (son las $HORA_MADRID:00). Este disparo no corresponde, se omite."
+            fi
           fi
 
       # Paso 1: Descargar el código de tu repositorio (Versión v4 estable)
