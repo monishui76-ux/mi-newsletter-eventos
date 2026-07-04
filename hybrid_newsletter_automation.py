@@ -57,6 +57,8 @@ def call_with_timeout(func, timeout_seconds, *args, **kwargs):
     return value
 
 EVENT_KEYWORDS = ['agenda', 'eventos', 'programacion', 'exposiciones', 'actividades', 'calendario']
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp')
+MAX_LINKS_PER_SOURCE = 8  # tope para no disparar el coste con sitios enormes (universidades, ayuntamientos)
 
 def get_sources(file_path):
     rss_feeds, web_urls = [], []
@@ -174,8 +176,12 @@ def scrape_web_with_gemini(url):
             for img_tag in soup.find_all('img', src=True):
                 img_src = img_tag['src']
                 full_img_url = urljoin(current_url, img_src)
-                if not any(ext in full_img_url.lower() for ext in ['.gif', '.svg', '.ico']) and \
-                   'logo' not in full_img_url.lower() and 'icon' not in full_img_url.lower():
+                if not full_img_url.startswith(('http://', 'https://')):
+                    continue  # descarta blob:, data: y otros esquemas que no se pueden descargar
+                path_lower = urlparse(full_img_url).path.lower()
+                if not path_lower.endswith(IMG_EXTENSIONS):
+                    continue  # descarta píxeles de tracking y archivos sin extensión de imagen real
+                if 'logo' not in full_img_url.lower() and 'icon' not in full_img_url.lower():
                     all_image_urls.append(full_img_url)
 
             for s in soup(["script", "style", "header", "footer", "nav", "aside", "form", "noscript", "meta", "link"]): s.extract()
@@ -184,7 +190,7 @@ def scrape_web_with_gemini(url):
 
             if current_depth < MAX_DEPTH:
                 new_links = find_event_links(current_url, soup, visited_urls)
-                urls_to_scrape.extend(new_links)
+                urls_to_scrape.extend(new_links[:MAX_LINKS_PER_SOURCE])
                 current_depth += 1
             
             time.sleep(1) # Pausa para evitar bloqueos
@@ -262,17 +268,27 @@ def summarize_and_order_events_with_gemini(all_events):
     {txt}
     """
     
-    try:
-        response = call_with_timeout(
-            client.models.generate_content, 180,
-            model=MODEL_NAME, contents=prompt
-        )
-        clean_res = response.text.replace('```html', '').replace('```', '').strip()
-        if not clean_res.startswith('<'):
-            clean_res = f"<p>Newsletter de Málaga - {hoy_str}</p>" + clean_res
-        return clean_res
-    except Exception as err:
-        return f"<p>ERROR AL GENERAR NEWSLETTER: {str(err)}</p>"
+    MAX_INTENTOS = 3
+    for intento in range(1, MAX_INTENTOS + 1):
+        try:
+            response = call_with_timeout(
+                client.models.generate_content, 240,
+                model=MODEL_NAME, contents=prompt
+            )
+            clean_res = response.text.replace('```html', '').replace('```', '').strip()
+            if not clean_res.startswith('<'):
+                clean_res = f"<p>Newsletter de Málaga - {hoy_str}</p>" + clean_res
+            return clean_res
+        except Exception as err:
+            print(f"Intento {intento}/{MAX_INTENTOS} fallido al generar la newsletter final: {err}")
+            if intento < MAX_INTENTOS:
+                time.sleep(15)
+
+    return (
+        f"<p>No se ha podido generar la newsletter esta semana por un problema técnico "
+        f"con Gemini tras {MAX_INTENTOS} intentos. Se recogieron {len(all_events)} eventos "
+        f"correctamente, el fallo fue solo en el resumen final. Se reintentará la próxima semana.</p>"
+    )
 
 def send_email(subject, content):
     user, pwd = os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS")
