@@ -17,8 +17,9 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      # Paso 0: Comprobar que realmente son las 7:00 en Madrid
-      # (solo aplica a los disparos automáticos; si lo lanzas tú a mano, siempre se ejecuta)
+      # Paso 0: Comprobar que el disparo corresponde al horario actual de Madrid
+      # (comparamos qué cron disparó frente al horario de verano/invierno real,
+      # en vez de exigir una hora exacta, porque GitHub puede retrasar los cron)
       - name: Comprobar que son las 7:00 en Madrid
         id: check_time
         run: |
@@ -26,12 +27,15 @@ jobs:
             echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
             echo "Ejecución manual: se omite la comprobación de hora."
           else
-            HORA_MADRID=$(TZ='Europe/Madrid' date +%H)
-            if [ "$HORA_MADRID" = "07" ]; then
+            OFFSET_MADRID=$(TZ='Europe/Madrid' date +%z)
+            CRON_QUE_DISPARO="${{ github.event.schedule }}"
+            if [ "$OFFSET_MADRID" = "+0200" ] && [ "$CRON_QUE_DISPARO" = "0 5 * * 0" ]; then
+              echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
+            elif [ "$OFFSET_MADRID" = "+0100" ] && [ "$CRON_QUE_DISPARO" = "0 6 * * 0" ]; then
               echo "debe_ejecutar=true" >> "$GITHUB_OUTPUT"
             else
               echo "debe_ejecutar=false" >> "$GITHUB_OUTPUT"
-              echo "No son las 7:00 en Madrid (son las $HORA_MADRID:00). Este disparo no corresponde, se omite."
+              echo "Disparo '$CRON_QUE_DISPARO' no corresponde al horario actual de Madrid (offset $OFFSET_MADRID). Se omite."
             fi
           fi
 
